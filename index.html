@@ -22,6 +22,7 @@
   </script>
 
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -94,11 +95,17 @@
     <!-- Persistent Session Status & Shared Date Bar -->
     <div class="bg-[#1e0a45] border-t border-purple-900/70 py-1.5 px-4 sm:px-6">
       <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-        <!-- Remembered Session Badge (No relogging needed) -->
-        <div class="flex items-center gap-2 text-[11px] text-purple-200">
-          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          <span class="font-bold text-white">Remember Me Session Active</span>
-          <span class="text-purple-300 hidden sm:inline">(Auto-authenticated on this device)</span>
+        <!-- Remembered Session Badge (No relogging needed) & Supabase Sync Indicator -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="flex items-center gap-1.5 text-[11px] text-purple-200">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="font-bold text-white">Remember Me Active</span>
+          </div>
+          <span class="text-purple-600 hidden sm:inline">|</span>
+          <div id="supabase-pill" class="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-purple-900/60 border border-purple-700/60 text-[10px]">
+            <span id="supabase-indicator" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            <span id="supabase-status" class="font-bold text-purple-200">Supabase Cloud: Connecting...</span>
+          </div>
         </div>
 
         <div class="flex items-center gap-2 text-[11px]">
@@ -630,6 +637,111 @@
       return '₦' + v.toLocaleString('en-NG');
     }
 
+    // ================= SUPABASE CLOUD SYNC ENGINE =================
+    const SUPABASE_URL = 'https://qjrfqcemgqiqabrhwpmp.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_HKaojNLOWrV3nwlt2w39yA_Bi5YcSLH';
+    let sbClient = null;
+
+    if (window.supabase) {
+      try {
+        sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      } catch (err) {
+        console.warn('Supabase initialization failed:', err);
+      }
+    }
+
+    async function initSupabaseCloud() {
+      const statusEl = document.getElementById('supabase-status');
+      const indicatorEl = document.getElementById('supabase-indicator');
+      if (!sbClient) {
+        if (statusEl) statusEl.textContent = 'Supabase: Offline Mode (Local)';
+        if (indicatorEl) indicatorEl.className = 'w-2 h-2 rounded-full bg-slate-400';
+        return;
+      }
+
+      try {
+        const { data: cloudExpenses, error } = await sbClient.from('expenses').select('*').order('date', { ascending: false });
+
+        if (error) {
+          if (error.code === '42P01' || (error.message && error.message.includes('does not exist'))) {
+            if (statusEl) statusEl.textContent = 'Supabase: SQL Table Setup Pending';
+            if (indicatorEl) indicatorEl.className = 'w-2 h-2 rounded-full bg-amber-400';
+          } else {
+            if (statusEl) statusEl.textContent = 'Supabase Cloud: Ready';
+            if (indicatorEl) indicatorEl.className = 'w-2 h-2 rounded-full bg-emerald-400';
+          }
+          return;
+        }
+
+        if (cloudExpenses && cloudExpenses.length > 0) {
+          expenses = cloudExpenses.map(e => ({
+            id: e.id,
+            amount: Number(e.amount),
+            date: e.date,
+            category: e.category,
+            propertyId: e.property_id,
+            propertyName: e.property_name,
+            description: e.description,
+            paymentMethod: e.payment_method || 'Bank Transfer',
+            vendor: e.vendor || '',
+            receiptUrl: e.receipt_url || '',
+            source: e.source || 'manual'
+          }));
+          localStorage.setItem('propex_remind_exps', JSON.stringify(expenses));
+          recalculateAll();
+        } else if (expenses.length > 0) {
+          const payload = expenses.map(e => ({
+            id: e.id,
+            amount: e.amount,
+            date: e.date,
+            category: e.category,
+            property_id: e.propertyId,
+            property_name: e.propertyName,
+            description: e.description,
+            source: e.source || 'manual'
+          }));
+          await sbClient.from('expenses').upsert(payload);
+        }
+
+        if (statusEl) statusEl.textContent = 'Supabase Cloud: Live & Synced 🟢';
+        if (indicatorEl) indicatorEl.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      } catch (err) {
+        console.warn('Supabase sync error:', err);
+      }
+    }
+
+    async function syncExpenseToCloud(exp, action = 'upsert') {
+      if (!sbClient) return;
+      const statusEl = document.getElementById('supabase-status');
+      const indicatorEl = document.getElementById('supabase-indicator');
+      if (indicatorEl) indicatorEl.className = 'w-2 h-2 rounded-full bg-blue-400 animate-ping';
+      if (statusEl) statusEl.textContent = 'Supabase: Syncing...';
+
+      try {
+        if (action === 'delete') {
+          await sbClient.from('expenses').delete().eq('id', exp.id);
+        } else {
+          await sbClient.from('expenses').upsert({
+            id: exp.id,
+            amount: exp.amount,
+            date: exp.date,
+            category: exp.category,
+            property_id: exp.propertyId,
+            property_name: exp.propertyName,
+            description: exp.description,
+            payment_method: exp.paymentMethod || 'Bank Transfer',
+            vendor: exp.vendor || '',
+            receipt_url: exp.receiptUrl || '',
+            source: exp.source || 'manual'
+          });
+        }
+        if (indicatorEl) indicatorEl.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        if (statusEl) statusEl.textContent = 'Supabase Cloud: Live & Synced 🟢';
+      } catch (err) {
+        console.warn('Sync cloud error:', err);
+      }
+    }
+
     function persistToStorage() {
       localStorage.setItem('propex_remind_props', JSON.stringify(properties));
       localStorage.setItem('propex_remind_cats', JSON.stringify(categories));
@@ -960,7 +1072,7 @@
       const description = document.getElementById('manual-description').value || `${category} expense`;
       const prop = properties.find(p => p.id === propertyId);
 
-      expenses.unshift({
+      const newItem = {
         id: `exp-${Date.now()}`,
         amount,
         date,
@@ -969,7 +1081,9 @@
         category,
         description,
         source: 'manual'
-      });
+      };
+      expenses.unshift(newItem);
+      syncExpenseToCloud(newItem, 'upsert');
 
       document.getElementById('card-manual-mode').reset();
       recalculateAll();
@@ -998,7 +1112,7 @@
       const memo = document.getElementById('voice-parsed-memo').value;
       const prop = properties.find(p => p.id === propertyId);
 
-      expenses.unshift({
+      const newItem = {
         id: `exp-${Date.now()}`,
         amount,
         date,
@@ -1007,7 +1121,9 @@
         category,
         description: memo,
         source: 'voice'
-      });
+      };
+      expenses.unshift(newItem);
+      syncExpenseToCloud(newItem, 'upsert');
 
       cancelVoiceParse();
       document.getElementById('editable-transcript-area').value = '';
@@ -1028,7 +1144,9 @@
     }
 
     function executeDeleteExpense() {
+      const itemToDelete = expenses.find(e => e.id === deleteCandidateId);
       expenses = expenses.filter(e => e.id !== deleteCandidateId);
+      if (itemToDelete) syncExpenseToCloud(itemToDelete, 'delete');
       closeDeleteModal();
       recalculateAll();
       showToast('Expense removed', '🗑️');
@@ -1082,6 +1200,7 @@
     window.addEventListener('DOMContentLoaded', () => {
       populateDropdowns();
       recalculateAll();
+      initSupabaseCloud();
     });
   </script>
 </body>
