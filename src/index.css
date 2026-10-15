@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-royal-950: #2e1065;
+    --color-royal-900: #3b0764;
+    --color-royal-800: #581c87;
+    --color-royal-700: #6b21a8;
+    --color-royal-600: #7e22ce;
+    --color-royal-500: #9333ea;
+    --color-royal-400: #a855f7;
+    --color-royal-100: #f3e8ff;
+    --color-royal-50: #faf5ff;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Custom scrollbar for modern sleek aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
